@@ -1,0 +1,15 @@
+{
+  "name": "adb-relay-server",
+  "version": "0.1.0",
+  "description": "Minimal reverse TCP relay for proxying a real Android adbd to a VPS-local adb port.",
+  "type": "module",
+  "bin": {
+    "adb-relay-server": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
