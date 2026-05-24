@@ -100,7 +100,10 @@ ports:
 
 ## Android Agent
 
-每次推送到 `main` 或创建 `v*` tag 时，GitHub Actions 会自动编译 Android APK，并在 workflow 运行页面上传 `adb-relay-agent-debug` artifact。
+每次推送到 `main` 或创建 `v*` tag 时，GitHub Actions 会自动编译 Android APK。
+
+- 推送到 `main`：APK 会上传到 `android-apk-latest` 这个 GitHub Release。
+- 创建 `v*` tag：APK 会上传到对应版本的 GitHub Release。
 
 也可以在本地构建并安装 Android App：
 
@@ -227,7 +230,7 @@ ADB_RELAY_DEVICES        逗号分隔的多设备映射
 
 `.github/workflows/docker-image.yml` 会在 pull request 上构建镜像，并在 `main` 和 `v*` tag 上推送镜像到 GHCR。
 
-同一个 workflow 还会自动编译 Android Agent APK，并上传名为 `adb-relay-agent-debug` 的 artifact。
+同一个 workflow 还会自动编译 Android Agent APK。`main` 分支的最新 APK 会发布到 `android-apk-latest` release，版本 tag 的 APK 会发布到对应版本 release。
 
 ```text
 ghcr.io/endlessjy/adb-relay:latest

@@ -1,4 +1,4 @@
-name: Docker Image
+name: Build
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -92,10 +92,30 @@ jobs:
         working-directory: android-agent
         run: ./build.sh
 
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: adb-relay-agent-debug
-          path: android-agent/adb-relay-agent-debug.apk
-          if-no-files-found: error
-          retention-days: 7
+      - name: Publish Android APK to GitHub Release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            release_tag="${GITHUB_REF_NAME}"
+            release_title="ADB Relay ${GITHUB_REF_NAME}"
+            release_flags=""
+          else
+            release_tag="android-apk-latest"
+            release_title="ADB Relay Android APK latest"
+            release_flags="--prerelease --latest=false"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -f "${release_tag}" "${GITHUB_SHA}"
+            git push -f origin "${release_tag}"
+          fi
+
+          if ! gh release view "${release_tag}" >/dev/null 2>&1; then
+            gh release create "${release_tag}" \
+              --title "${release_title}" \
+              --notes "自动编译生成的 Android Agent APK。" \
+              ${release_flags}
+          fi
+
+          gh release upload "${release_tag}" android-agent/adb-relay-agent-debug.apk --clobber
