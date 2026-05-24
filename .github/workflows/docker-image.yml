@@ -20,7 +20,7 @@ env:
   DOCKER_BUILD_RECORD_UPLOAD: false
 
 jobs:
-  test-and-build:
+  docker:
     runs-on: ubuntu-latest
 
     steps:
@@ -66,3 +66,36 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+
+  android-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build Android agent APK
+        working-directory: android-agent
+        run: ./build.sh
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: adb-relay-agent-debug
+          path: android-agent/adb-relay-agent-debug.apk
+          if-no-files-found: error
+          retention-days: 7

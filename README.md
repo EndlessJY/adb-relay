@@ -42,13 +42,7 @@ docker-compose.yml
 
 ## Docker 部署
 
-### 1. 构建镜像
-
-```bash
-docker build -t adb-relay:local .
-```
-
-### 2. 创建 `.env`
+### 1. 创建 `.env`
 
 ```bash
 cp .env.example .env
@@ -59,17 +53,21 @@ cp .env.example .env
 ```env
 ADB_RELAY_TOKEN=replace-with-a-long-random-token
 ADB_RELAY_DEVICE_LISTEN=0.0.0.0:7000
-ADB_RELAY_ADB_LISTEN=0.0.0.0:40001
+ADB_RELAY_DEVICES=phone-1:0.0.0.0:40001,phone-2:0.0.0.0:40002
 DEVICE_RELAY_PORT=7000
-ADB_RELAY_PORT=40001
+ADB_RELAY_PORT_1=40001
+ADB_RELAY_PORT_2=40002
 ```
+
+默认配置是多设备模式，`phone-1` 对应 `127.0.0.1:40001`，`phone-2` 对应 `127.0.0.1:40002`。
 
 在 Docker 容器内，服务端应监听 `0.0.0.0`。Compose 文件已经把宿主机侧 ADB 端口限制到 `127.0.0.1`。
 
-### 3. 启动中继
+### 2. 从 GitHub 拉取镜像并启动
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 docker compose logs -f adb-relay
 ```
 
@@ -77,10 +75,11 @@ docker compose logs -f adb-relay
 
 ```text
 [listen] device relay on 0.0.0.0:7000
-[listen] adb local port on 0.0.0.0:40001
+[listen] adb local port for phone-1 on 0.0.0.0:40001
+[listen] adb local port for phone-2 on 0.0.0.0:40002
 ```
 
-### 4. 开放防火墙
+### 3. 开放防火墙
 
 VPS 上只需要开放 Android Agent 连接的端口。
 
@@ -92,14 +91,18 @@ ufw allow 7000/tcp
 
 ```yaml
 ports:
+  - "7000:7000"
   - "127.0.0.1:40001:40001"
+  - "127.0.0.1:40002:40002"
 ```
 
 这表示 VPS 本机的 code-server 或 shell 可以连接它，但公网不能直接访问。
 
 ## Android Agent
 
-构建并安装 Android App：
+每次推送到 `main` 或创建 `v*` tag 时，GitHub Actions 会自动编译 Android APK，并在 workflow 运行页面上传 `adb-relay-agent-debug` artifact。
+
+也可以在本地构建并安装 Android App：
 
 ```bash
 cd android-agent
@@ -149,16 +152,18 @@ adb -s 127.0.0.1:40001 shell getprop ro.product.model
 
 每台手机需要一个稳定的 `Device id` 和一个独立的 ADB 端口。
 
-`.env` 示例：
+`.env.example` 默认已经是双设备模式：
 
 ```env
 ADB_RELAY_TOKEN=replace-with-a-long-random-token
 ADB_RELAY_DEVICE_LISTEN=0.0.0.0:7000
 ADB_RELAY_DEVICES=phone-1:0.0.0.0:40001,phone-2:0.0.0.0:40002
 DEVICE_RELAY_PORT=7000
+ADB_RELAY_PORT_1=40001
+ADB_RELAY_PORT_2=40002
 ```
 
-在 `docker-compose.yml` 中增加第二个 ADB 端口：
+`docker-compose.yml` 默认发布两个 ADB 端口：
 
 ```yaml
 ports:
@@ -170,7 +175,8 @@ ports:
 启动服务：
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 从 VPS 连接：
@@ -221,6 +227,8 @@ ADB_RELAY_DEVICES        逗号分隔的多设备映射
 
 `.github/workflows/docker-image.yml` 会在 pull request 上构建镜像，并在 `main` 和 `v*` tag 上推送镜像到 GHCR。
 
+同一个 workflow 还会自动编译 Android Agent APK，并上传名为 `adb-relay-agent-debug` 的 artifact。
+
 ```text
 ghcr.io/endlessjy/adb-relay:latest
 ghcr.io/endlessjy/adb-relay:main
@@ -235,9 +243,10 @@ docker run -d \
   --restart unless-stopped \
   -e ADB_RELAY_TOKEN='replace-with-a-long-random-token' \
   -e ADB_RELAY_DEVICE_LISTEN='0.0.0.0:7000' \
-  -e ADB_RELAY_ADB_LISTEN='0.0.0.0:40001' \
+  -e ADB_RELAY_DEVICES='phone-1:0.0.0.0:40001,phone-2:0.0.0.0:40002' \
   -p 7000:7000 \
   -p 127.0.0.1:40001:40001 \
+  -p 127.0.0.1:40002:40002 \
   ghcr.io/endlessjy/adb-relay:latest
 ```
 

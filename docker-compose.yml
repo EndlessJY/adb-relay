@@ -1,15 +1,14 @@
 services:
   adb-relay:
-    build:
-      context: .
-    image: adb-relay:local
+    image: ghcr.io/endlessjy/adb-relay:latest
+    pull_policy: always
     container_name: adb-relay
     restart: unless-stopped
     environment:
       ADB_RELAY_TOKEN: ${ADB_RELAY_TOKEN:?set ADB_RELAY_TOKEN in .env}
       ADB_RELAY_DEVICE_LISTEN: ${ADB_RELAY_DEVICE_LISTEN:-0.0.0.0:7000}
-      ADB_RELAY_ADB_LISTEN: ${ADB_RELAY_ADB_LISTEN:-0.0.0.0:40001}
-      ADB_RELAY_DEVICES: ${ADB_RELAY_DEVICES:-}
+      ADB_RELAY_DEVICES: ${ADB_RELAY_DEVICES:?set ADB_RELAY_DEVICES in .env}
     ports:
       - "${DEVICE_RELAY_PORT:-7000}:7000"
-      - "127.0.0.1:${ADB_RELAY_PORT:-40001}:40001"
+      - "127.0.0.1:${ADB_RELAY_PORT_1:-40001}:40001"
+      - "127.0.0.1:${ADB_RELAY_PORT_2:-40002}:40002"
