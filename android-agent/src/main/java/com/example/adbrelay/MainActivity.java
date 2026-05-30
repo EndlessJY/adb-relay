@@ -95,8 +95,8 @@ public class MainActivity extends Activity {
         String adbdHostValue = text(adbdHost);
         String adbdPortValue = text(adbdPort);
 
-        if (hostValue.length() == 0 || tokenValue.length() == 0 || deviceValue.length() == 0) {
-            Toast.makeText(this, "VPS host, token, and device id are required.", Toast.LENGTH_LONG).show();
+        if (hostValue.length() == 0 || tokenValue.length() == 0 || deviceValue.length() == 0 || adbdHostValue.length() == 0) {
+            Toast.makeText(this, "VPS host, token, device id, and adbd host are required.", Toast.LENGTH_LONG).show();
             return;
         }
         if (hasWhitespace(deviceValue) || hasWhitespace(tokenValue)) {
@@ -104,8 +104,16 @@ public class MainActivity extends Activity {
             return;
         }
 
-        int relayPort = parsePort(portValue, 7000);
-        int localAdbdPort = parsePort(adbdPortValue, 5555);
+        Integer relayPort = parsePort(portValue);
+        if (relayPort == null) {
+            Toast.makeText(this, "VPS relay port must be between 1 and 65535.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Integer localAdbdPort = parsePort(adbdPortValue);
+        if (localAdbdPort == null) {
+            Toast.makeText(this, "adbd port must be between 1 and 65535.", Toast.LENGTH_LONG).show();
+            return;
+        }
 
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("serverHost", hostValue)
@@ -144,13 +152,13 @@ public class MainActivity extends Activity {
         return input.getText().toString().trim();
     }
 
-    private int parsePort(String value, int fallback) {
+    private Integer parsePort(String value) {
         try {
             int parsed = Integer.parseInt(value);
             if (parsed > 0 && parsed <= 65535) return parsed;
         } catch (NumberFormatException ignored) {
         }
-        return fallback;
+        return null;
     }
 
     private boolean hasWhitespace(String value) {

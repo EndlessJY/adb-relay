@@ -26,12 +26,19 @@ public class RelayForegroundService extends Service {
 
     private static final String CHANNEL_ID = "adb-relay";
     private static final int NOTIFICATION_ID = 7;
+    private static final int COPY_BUFFER_SIZE = 256 * 1024;
+    private static final int SOCKET_BUFFER_SIZE = 1024 * 1024;
+    private static final long WAKE_LOCK_TIMEOUT_MS = 3 * 60 * 60 * 1000L;
 
-    private final AtomicBoolean running = new AtomicBoolean(false);
     private Thread worker;
+    private WorkerControl workerControl;
     private PowerManager.WakeLock wakeLock;
-    private volatile Socket activeRelay;
-    private volatile Socket activeAdbd;
+
+    private static final class WorkerControl {
+        final AtomicBoolean running = new AtomicBoolean(true);
+        volatile Socket relay;
+        volatile Socket adbd;
+    }
 
     @Override
     public void onCreate() {
@@ -55,7 +62,7 @@ public class RelayForegroundService extends Service {
         RelayConfig config = RelayConfig.fromIntent(intent);
         startForeground(NOTIFICATION_ID, notification("Starting"));
         startWorker(config);
-        return START_STICKY;
+        return START_REDELIVER_INTENT;
     }
 
     @Override
@@ -71,79 +78,89 @@ public class RelayForegroundService extends Service {
 
     private synchronized void startWorker(final RelayConfig config) {
         stopWorker();
-        running.set(true);
+        final WorkerControl control = new WorkerControl();
+        workerControl = control;
         acquireWakeLock();
         worker = new Thread(new Runnable() {
             @Override
             public void run() {
-                runLoop(config);
+                runLoop(config, control);
             }
         }, "adb-relay-worker");
         worker.start();
     }
 
     private synchronized void stopWorker() {
-        running.set(false);
-        closeQuietly(activeRelay);
-        closeQuietly(activeAdbd);
-        if (worker != null) {
-            worker.interrupt();
-            worker = null;
+        WorkerControl control = workerControl;
+        Thread thread = worker;
+
+        if (control != null) {
+            control.running.set(false);
+            closeQuietly(control.relay);
+            closeQuietly(control.adbd);
         }
+        if (thread != null) {
+            thread.interrupt();
+            joinQuietly(thread, 2000);
+        }
+        worker = null;
+        workerControl = null;
         releaseWakeLock();
     }
 
-    private void runLoop(RelayConfig config) {
-        while (running.get()) {
+    private void runLoop(RelayConfig config, WorkerControl control) {
+        while (control.running.get()) {
             try {
                 updateNotification("Connecting to relay");
-                connectOnce(config);
+                connectOnce(config, control);
             } catch (IOException error) {
-                updateNotification("Retrying: " + shortMessage(error));
-                sleep(2000);
+                if (control.running.get()) {
+                    updateNotification("Retrying: " + shortMessage(error));
+                    sleep(2000, control);
+                }
             }
         }
     }
 
-    private void connectOnce(RelayConfig config) throws IOException {
+    private void connectOnce(RelayConfig config, WorkerControl control) throws IOException {
         Socket relay = new Socket();
         Socket adbd = new Socket();
-        activeRelay = relay;
-        activeAdbd = adbd;
+        control.relay = relay;
+        control.adbd = adbd;
         try {
-            relay.setTcpNoDelay(true);
+            tuneSocket(relay);
             relay.connect(new InetSocketAddress(config.serverHost, config.serverPort), 10000);
             relay.getOutputStream().write(config.handshakeBytes());
             relay.getOutputStream().flush();
 
             updateNotification("Connecting to adbd");
-            adbd.setTcpNoDelay(true);
+            tuneSocket(adbd);
             adbd.connect(new InetSocketAddress(config.adbdHost, config.adbdPort), 5000);
 
             updateNotification("Relaying " + config.deviceId);
-            pipeBidirectional(relay, adbd);
+            pipeBidirectional(relay, adbd, control);
         } finally {
             closeQuietly(relay);
             closeQuietly(adbd);
-            activeRelay = null;
-            activeAdbd = null;
+            if (control.relay == relay) control.relay = null;
+            if (control.adbd == adbd) control.adbd = null;
         }
     }
 
-    private void pipeBidirectional(final Socket relay, final Socket adbd) throws IOException {
+    private void pipeBidirectional(final Socket relay, final Socket adbd, final WorkerControl control) throws IOException {
         final CountDownLatch done = new CountDownLatch(1);
         final AtomicReference<IOException> failure = new AtomicReference<IOException>();
 
         Thread relayToAdbd = new Thread(new Runnable() {
             @Override
             public void run() {
-                copy(relay, adbd, done, failure);
+                copy(relay, adbd, done, failure, control);
             }
         }, "relay-to-adbd");
         Thread adbdToRelay = new Thread(new Runnable() {
             @Override
             public void run() {
-                copy(adbd, relay, done, failure);
+                copy(adbd, relay, done, failure, control);
             }
         }, "adbd-to-relay");
 
@@ -159,9 +176,9 @@ public class RelayForegroundService extends Service {
             closeQuietly(adbd);
         }
 
-        joinQuietly(relayToAdbd);
-        joinQuietly(adbdToRelay);
-        if (failure.get() != null && running.get()) {
+        joinQuietly(relayToAdbd, 1000);
+        joinQuietly(adbdToRelay, 1000);
+        if (failure.get() != null && control.running.get()) {
             throw failure.get();
         }
     }
@@ -170,18 +187,19 @@ public class RelayForegroundService extends Service {
             Socket inputSocket,
             Socket outputSocket,
             CountDownLatch done,
-            AtomicReference<IOException> failure
+            AtomicReference<IOException> failure,
+            WorkerControl control
     ) {
-        byte[] buffer = new byte[16 * 1024];
+        byte[] buffer = new byte[COPY_BUFFER_SIZE];
         try {
             InputStream input = inputSocket.getInputStream();
             OutputStream output = outputSocket.getOutputStream();
-            while (running.get()) {
+            while (control.running.get()) {
                 int read = input.read(buffer);
                 if (read == -1) break;
                 output.write(buffer, 0, read);
-                output.flush();
             }
+            output.flush();
         } catch (IOException error) {
             failure.compareAndSet(null, error);
         } finally {
@@ -237,7 +255,7 @@ public class RelayForegroundService extends Service {
         PowerManager manager = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (manager != null) {
             wakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ADBRelay:relay");
-            wakeLock.acquire(60 * 60 * 1000L);
+            wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
         }
     }
 
@@ -248,11 +266,12 @@ public class RelayForegroundService extends Service {
         wakeLock = null;
     }
 
-    private void sleep(long millis) {
+    private void sleep(long millis, WorkerControl control) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
+            control.running.set(false);
         }
     }
 
@@ -264,12 +283,19 @@ public class RelayForegroundService extends Service {
         }
     }
 
-    private void joinQuietly(Thread thread) {
+    private void joinQuietly(Thread thread, long timeoutMillis) {
         try {
-            thread.join(500);
+            thread.join(timeoutMillis);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private void tuneSocket(Socket socket) throws IOException {
+        socket.setTcpNoDelay(true);
+        socket.setKeepAlive(true);
+        socket.setReceiveBufferSize(SOCKET_BUFFER_SIZE);
+        socket.setSendBufferSize(SOCKET_BUFFER_SIZE);
     }
 
     private String shortMessage(IOException error) {

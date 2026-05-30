@@ -175,7 +175,7 @@ export class RelayServer extends EventEmitter {
     const device = deviceId
       ? this.devices.get(deviceId)
       : [...this.devices.values()].find((entry) => !entry.busy);
-    if (!device) {
+    if (!device || device.busy) {
       client.destroy();
       return;
     }

@@ -264,7 +264,7 @@ docker compose logs -f adb-relay
 确认监听端口：
 
 ```bash
-ss -ltnp | grep -E '7000|40001'
+ss -ltnp | grep -E '7000|40001|40002'
 ```
 
 如果 `adb connect` 成功但命令失败，请检查：

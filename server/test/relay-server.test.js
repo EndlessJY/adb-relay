@@ -93,6 +93,36 @@ test("mapped adb ports are piped to their matching device ids", async (t) => {
   assert.equal(await readOnce(adb2), "from-phone-2");
 });
 
+test("mapped adb port rejects concurrent clients for the same device", async (t) => {
+  const server = new RelayServer({
+    token: "secret",
+    deviceListen: { host: "127.0.0.1", port: 0 },
+    adbMappings: [
+      { deviceId: "phone-1", listen: { host: "127.0.0.1", port: 0 } }
+    ]
+  });
+  t.after(() => server.stop());
+
+  await server.start();
+  const { devicePort, adbMappings } = server.addresses();
+
+  const device = await connect(devicePort);
+  t.after(() => device.destroy());
+  device.write("ADBRELAY/1 phone-1 secret\n");
+  await once(server, "deviceReady");
+
+  const firstAdb = await connect(adbMappings.get("phone-1").port);
+  t.after(() => firstAdb.destroy());
+  firstAdb.write("first-client");
+  assert.equal(await readOnce(device), "first-client");
+
+  const secondAdb = await connect(adbMappings.get("phone-1").port);
+  await once(secondAdb, "close");
+
+  firstAdb.write("still-first-client");
+  assert.equal(await readOnce(device), "still-first-client");
+});
+
 test("device with a wrong token is rejected before it can serve adb clients", async (t) => {
   const server = new RelayServer({
     token: "secret",

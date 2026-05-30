@@ -4,4 +4,5 @@ build-probe/
 *.apk
 *.idsig
 *.keystore
+!android-agent/debug.keystore
 .DS_Store
