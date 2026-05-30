@@ -93,6 +93,15 @@ jobs:
         working-directory: android-agent
         run: ./build.sh
 
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adb-relay-agent-debug-apk
+          path: android-agent/adb-relay-agent-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
       - name: Publish Android APK to GitHub Release
         if: github.event_name != 'pull_request'
         env:
